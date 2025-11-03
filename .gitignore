@@ -70,6 +70,8 @@ app/multithreaded_workload/
 app/priority_inversion_demo/
 app/build_apps.sh
 app/README.md
+app/jack_test/build
+app/jack_test/results
 
 # Cargo drops lock files in projects to capture resolved dependencies.
 # We don't want to record these.
