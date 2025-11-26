@@ -92,6 +92,10 @@ struct _thread_base {
 #ifdef CONFIG_SCHED_DEADLINE
 	int prio_deadline;
 #endif /* CONFIG_SCHED_DEADLINE */
+#ifdef CONFIG_736
+	int prio_exec_time;
+	int prio_weight;
+#endif
 
 #if defined(CONFIG_SCHED_SCALABLE) || defined(CONFIG_WAITQ_SCALABLE)
 	uint32_t order_key;
