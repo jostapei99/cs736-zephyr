@@ -1023,6 +1023,10 @@ __syscall void k_thread_deadline_set(k_tid_t thread, int deadline);
 __syscall void k_thread_absolute_deadline_set(k_tid_t thread, int deadline);
 #endif
 
+#ifdef CONFIG_736
+__syscall void k_thread_set_weight(k_tid_t tid, int weight);
+#endif
+
 /**
  * @brief Invoke the scheduler
  *

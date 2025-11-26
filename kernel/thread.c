@@ -699,6 +699,10 @@ char *z_setup_new_thread(struct k_thread *new_thread,
 #ifdef CONFIG_SCHED_DEADLINE
 	new_thread->base.prio_deadline = 0;
 #endif /* CONFIG_SCHED_DEADLINE */
+#ifdef CONFIG_736
+	new_thread->base.prio_exec_time = 0;
+	new_thread->base.prio_weight = 0;
+#endif /* CONFIG_736 */
 	new_thread->resource_pool = _current->resource_pool;
 
 #ifdef CONFIG_SMP

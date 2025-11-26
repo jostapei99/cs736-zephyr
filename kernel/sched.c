@@ -980,6 +980,22 @@ static inline void z_vrfy_k_thread_priority_set(k_tid_t thread, int prio)
 #include <zephyr/syscalls/k_thread_priority_set_mrsh.c>
 #endif /* CONFIG_USERSPACE */
 
+#ifdef CONFIG_736
+void z_impl_k_thread_set_weight(k_tid_t tid, int weight)
+{
+	struct k_thread *thread = tid;
+	K_SPINLOCK(&_sched_spinlock) {
+		if (z_is_thread_queued(thread)) {
+			dequeue_thread(thread);
+			thread->base.prio_weight = weight;
+			queue_thread(thread);
+		} else {
+			thread->base.prio_weight = weight;
+		}
+	}
+}
+#endif /* CONFIG_736 */
+
 #ifdef CONFIG_SCHED_DEADLINE
 void z_impl_k_thread_absolute_deadline_set(k_tid_t tid, int deadline)
 {
