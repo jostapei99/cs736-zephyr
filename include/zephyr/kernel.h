@@ -1024,7 +1024,8 @@ __syscall void k_thread_absolute_deadline_set(k_tid_t thread, int deadline);
 #endif
 
 #ifdef CONFIG_736
-__syscall void k_thread_set_weight(k_tid_t tid, int weight);
+__syscall void k_thread_weight_set(k_tid_t tid, int weight);
+__syscall void k_thread_exec_time_set(k_tid_t tid, int exec_time); // I'm thinking time will be in cycles like deadline
 #endif
 
 /**

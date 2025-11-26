@@ -981,7 +981,7 @@ static inline void z_vrfy_k_thread_priority_set(k_tid_t thread, int prio)
 #endif /* CONFIG_USERSPACE */
 
 #ifdef CONFIG_736
-void z_impl_k_thread_set_weight(k_tid_t tid, int weight)
+void z_impl_k_thread_weight_set(k_tid_t tid, int weight)
 {
 	struct k_thread *thread = tid;
 	K_SPINLOCK(&_sched_spinlock) {
@@ -991,6 +991,20 @@ void z_impl_k_thread_set_weight(k_tid_t tid, int weight)
 			queue_thread(thread);
 		} else {
 			thread->base.prio_weight = weight;
+		}
+	}
+}
+
+void z_impl_k_thread_exec_time_set(k_tid_t tid, int exec_time)
+{
+	struct k_thread *thread = tid;
+	K_SPINLOCK(&_sched_spinlock) {
+		if (z_is_thread_queued(thread)) {
+			dequeue_thread(thread);
+			thread->base.prio_exec_time = exec_time;
+			queue_thread(thread);
+		} else {
+			thread->base.prio_exec_time = exec_time;
 		}
 	}
 }
