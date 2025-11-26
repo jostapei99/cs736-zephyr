@@ -119,6 +119,14 @@ config SCHED_DEADLINE
 	  single priority will choose the next expiring deadline and
 	  not simply the least recently added thread.
 
+config 736
+	bool "Flag for CS736"
+	depends on SCHED_DEADLINE
+	help
+		Adds whatever we need for dynamic scheduling. Will probably
+		need more flags to set algorithm. (They can depend on this config
+		with "depends on 736")
+
 config SCHED_CPU_MASK
 	bool "CPU mask affinity/pinning API"
 	depends on SCHED_SIMPLE
