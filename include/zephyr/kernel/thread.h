@@ -95,6 +95,9 @@ struct _thread_base {
 #ifdef CONFIG_736
 	int prio_exec_time;
 	int prio_weight;
+#ifdef CONFIG_736_TIME_LEFT
+	int prio_time_left;
+#endif
 #endif
 
 #if defined(CONFIG_SCHED_SCALABLE) || defined(CONFIG_WAITQ_SCALABLE)

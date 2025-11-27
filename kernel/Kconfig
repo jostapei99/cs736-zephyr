@@ -127,6 +127,12 @@ config 736
 		need more flags to set algorithm. (They can depend on this config
 		with "depends on 736")
 
+config 736_TIME_LEFT
+	bool "Flag to track how much exec time is left"
+	depends on 736 && SCHED_THREAD_USAGE && THREAD_RUNTIME_STATS
+	help
+		Adds tracking to thread to see how much time is left
+
 config SCHED_CPU_MASK
 	bool "CPU mask affinity/pinning API"
 	depends on SCHED_SIMPLE
