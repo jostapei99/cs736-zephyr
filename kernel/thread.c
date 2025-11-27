@@ -701,7 +701,7 @@ char *z_setup_new_thread(struct k_thread *new_thread,
 #endif /* CONFIG_SCHED_DEADLINE */
 #ifdef CONFIG_736
 	new_thread->base.prio_exec_time = 0;
-	new_thread->base.prio_weight = 0;
+	new_thread->base.prio_weight = 1;
 #ifdef CONFIG_736_TIME_LEFT
 	new_thread->base.prio_time_left = 0;
 #endif /* CONFIG_736_TIME_LEFT */

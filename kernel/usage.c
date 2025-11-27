@@ -63,7 +63,6 @@ static void sched_thread_update_usage(struct k_thread *thread, uint32_t cycles)
 	
 #ifdef CONFIG_736_TIME_LEFT
 	if (thread->base.usage.track_usage) {
-		printk("Reducing time left by %d\n",cycles);
 		if (thread->base.prio_time_left < cycles) {
 			thread->base.prio_time_left = 0;
 		} else {
