@@ -1015,6 +1015,10 @@ void z_impl_k_thread_absolute_deadline_set(k_tid_t tid, int deadline)
 {
 	struct k_thread *thread = tid;
 
+#ifdef CONFIG_736_TIME_LEFT
+	thread->base.prio_time_left = thread->base.prio_exec_time;
+#endif
+
 	/* The prio_deadline field changes the sorting order, so can't
 	 * change it while the thread is in the run queue (dlists
 	 * actually are benign as long as we requeue it before we
