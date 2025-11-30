@@ -1,0 +1,209 @@
+# Sample Configuration Files for Different Schedulers
+
+# ==============================================================================
+# Configuration 1: Simple Scheduler (Default)
+# Best for: Small embedded systems with few threads
+# Code size: Smallest
+# ==============================================================================
+# prj_simple.conf
+
+CONFIG_TIMING_FUNCTIONS=y
+CONFIG_PRINTK=y
+CONFIG_EARLY_CONSOLE=y
+CONFIG_MAIN_STACK_SIZE=4096
+CONFIG_THREAD_NAME=y
+CONFIG_MUTEX=y
+CONFIG_SYS_CLOCK_TICKS_PER_SEC=10000
+CONFIG_FPU=y
+CONFIG_FPU_SHARING=y
+
+# Simple scheduler (default)
+CONFIG_SCHED_SIMPLE=y
+# CONFIG_SCHED_SCALABLE is not set
+# CONFIG_SCHED_MULTIQ is not set
+
+CONFIG_NUM_COOP_PRIORITIES=0
+CONFIG_NUM_PREEMPT_PRIORITIES=16
+CONFIG_TIMESLICING=n
+CONFIG_THREAD_STACK_INFO=y
+
+# ==============================================================================
+# Configuration 2: Scalable Scheduler (Red-Black Tree)
+# Best for: Systems with many threads (>20)
+# Code size: +2KB overhead
+# ==============================================================================
+# prj_scalable.conf
+
+CONFIG_TIMING_FUNCTIONS=y
+CONFIG_PRINTK=y
+CONFIG_EARLY_CONSOLE=y
+CONFIG_MAIN_STACK_SIZE=4096
+CONFIG_THREAD_NAME=y
+CONFIG_MUTEX=y
+CONFIG_SYS_CLOCK_TICKS_PER_SEC=10000
+CONFIG_FPU=y
+CONFIG_FPU_SHARING=y
+
+# Scalable scheduler
+# CONFIG_SCHED_SIMPLE is not set
+CONFIG_SCHED_SCALABLE=y
+# CONFIG_SCHED_MULTIQ is not set
+
+CONFIG_NUM_COOP_PRIORITIES=0
+CONFIG_NUM_PREEMPT_PRIORITIES=16
+CONFIG_TIMESLICING=n
+CONFIG_THREAD_STACK_INFO=y
+
+# ==============================================================================
+# Configuration 3: Multi-Queue Scheduler (Classic RTOS)
+# Best for: Traditional real-time behavior
+# Code size: Small overhead
+# RAM: Higher (array of lists)
+# ==============================================================================
+# prj_multiq.conf
+
+CONFIG_TIMING_FUNCTIONS=y
+CONFIG_PRINTK=y
+CONFIG_EARLY_CONSOLE=y
+CONFIG_MAIN_STACK_SIZE=4096
+CONFIG_THREAD_NAME=y
+CONFIG_MUTEX=y
+CONFIG_SYS_CLOCK_TICKS_PER_SEC=10000
+CONFIG_FPU=y
+CONFIG_FPU_SHARING=y
+
+# Multi-queue scheduler
+# CONFIG_SCHED_SIMPLE is not set
+# CONFIG_SCHED_SCALABLE is not set
+CONFIG_SCHED_MULTIQ=y
+
+CONFIG_NUM_COOP_PRIORITIES=0
+CONFIG_NUM_PREEMPT_PRIORITIES=16
+CONFIG_TIMESLICING=n
+CONFIG_THREAD_STACK_INFO=y
+
+# ==============================================================================
+# Configuration 4: Deadline Scheduler (EDF)
+# Best for: Tasks with explicit deadlines
+# MUST use with simple scheduler
+# Optimal for single-core systems
+# ==============================================================================
+# prj_deadline.conf
+
+CONFIG_TIMING_FUNCTIONS=y
+CONFIG_PRINTK=y
+CONFIG_EARLY_CONSOLE=y
+CONFIG_MAIN_STACK_SIZE=4096
+CONFIG_THREAD_NAME=y
+CONFIG_MUTEX=y
+CONFIG_SYS_CLOCK_TICKS_PER_SEC=10000
+CONFIG_FPU=y
+CONFIG_FPU_SHARING=y
+
+# Deadline scheduler (EDF)
+CONFIG_SCHED_DEADLINE=y
+CONFIG_SCHED_SIMPLE=y
+# CONFIG_SCHED_SCALABLE is not set
+# CONFIG_SCHED_MULTIQ is not set
+
+CONFIG_NUM_COOP_PRIORITIES=0
+CONFIG_NUM_PREEMPT_PRIORITIES=16
+CONFIG_TIMESLICING=n
+CONFIG_THREAD_STACK_INFO=y
+
+# ==============================================================================
+# Configuration 5: With Time Slicing (Round-Robin)
+# Enables time-slicing for threads at same priority
+# ==============================================================================
+# prj_timeslice.conf
+
+CONFIG_TIMING_FUNCTIONS=y
+CONFIG_PRINTK=y
+CONFIG_EARLY_CONSOLE=y
+CONFIG_MAIN_STACK_SIZE=4096
+CONFIG_THREAD_NAME=y
+CONFIG_MUTEX=y
+CONFIG_SYS_CLOCK_TICKS_PER_SEC=10000
+CONFIG_FPU=y
+CONFIG_FPU_SHARING=y
+
+CONFIG_SCHED_SIMPLE=y
+CONFIG_NUM_COOP_PRIORITIES=0
+CONFIG_NUM_PREEMPT_PRIORITIES=16
+
+# Enable time slicing (round-robin at same priority)
+CONFIG_TIMESLICING=y
+CONFIG_TIMESLICE_SIZE=10  # 10ms time slice
+
+CONFIG_THREAD_STACK_INFO=y
+
+# ==============================================================================
+# Configuration 6: With Priority Inheritance (for Workload 2)
+# Prevents unbounded priority inversion
+# ==============================================================================
+# prj_priority_inheritance.conf
+
+CONFIG_TIMING_FUNCTIONS=y
+CONFIG_PRINTK=y
+CONFIG_EARLY_CONSOLE=y
+CONFIG_MAIN_STACK_SIZE=4096
+CONFIG_THREAD_NAME=y
+CONFIG_MUTEX=y
+CONFIG_SYS_CLOCK_TICKS_PER_SEC=10000
+CONFIG_FPU=y
+CONFIG_FPU_SHARING=y
+
+CONFIG_SCHED_SIMPLE=y
+CONFIG_NUM_COOP_PRIORITIES=0
+CONFIG_NUM_PREEMPT_PRIORITIES=16
+CONFIG_TIMESLICING=n
+
+# Enable priority inheritance
+CONFIG_PRIORITY_INHERITANCE=y
+
+CONFIG_THREAD_STACK_INFO=y
+
+# ==============================================================================
+# How to Use These Configurations
+# ==============================================================================
+#
+# Option 1: Copy desired configuration to prj.conf
+# cp prj_deadline.conf prj.conf
+# west build -b qemu_cortex_m3 app/scheduler_evaluation/workload4_deadline_sporadic
+#
+# Option 2: Use overlay configuration
+# west build -b qemu_cortex_m3 app/scheduler_evaluation/workload1_periodic_control -- -DOVERLAY_CONFIG=prj_scalable.conf
+#
+# Option 3: Edit prj.conf directly and rebuild
+# vim app/scheduler_evaluation/workload1_periodic_control/prj.conf
+# west build -t pristine
+# west build -b qemu_cortex_m3 app/scheduler_evaluation/workload1_periodic_control
+#
+# ==============================================================================
+# Scheduler Compatibility Matrix
+# ==============================================================================
+#
+# Workload                    | Simple | Scalable | MultiQ | Deadline |
+# ----------------------------|--------|----------|--------|----------|
+# 1. Periodic Control         |   ✓    |    ✓     |   ✓    |    ✓     |
+# 2. Event-Driven Comm        |   ✓    |    ✓     |   ✓    |    ✓     |
+# 3. Mixed Criticality        |   ✓    |    ✓     |   ✓    |    ✓     |
+# 4. Deadline Sporadic        |   ✓*   |    ✓     |   ✗    |    ✓     |
+#
+# * Simple works but Deadline scheduler (EDF) is strongly recommended for Workload 4
+# ✗ MultiQ is incompatible with deadline-based scheduling
+#
+# ==============================================================================
+# Performance Expectations
+# ==============================================================================
+#
+# Metric              | Simple | Scalable | MultiQ | Deadline |
+# --------------------|--------|----------|--------|----------|
+# Code Size           | Small  | +2KB     | Small  | Small    |
+# RAM Usage           | Low    | Low      | High   | Low      |
+# Thread Add/Remove   | O(N)   | O(log N) | O(1)   | O(N)     |
+# Constant Overhead   | Low    | Medium   | Low    | Low      |
+# Max Utilization     | ~69%   | ~69%     | ~69%   | 100%     |
+# Best Use Case       | <10    | >20      | Trad.  | Deadline |
+#                     | threads| threads  | RTOS   | tasks    |
+#
