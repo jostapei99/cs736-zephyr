@@ -136,6 +136,12 @@ config 736_TIME_LEFT
 config 736_MOD_EDF
 	bool "Use modified EDF"
 
+config 736_WSRT
+	bool "Use Weighted Shortest Remaining Time scheduler"
+
+config 736_RMS
+	bool "Use Rate Monotonic scheduler"
+
 config SCHED_CPU_MASK
 	bool "CPU mask affinity/pinning API"
 	depends on SCHED_SIMPLE
