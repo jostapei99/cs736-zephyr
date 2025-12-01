@@ -87,6 +87,19 @@ static ALWAYS_INLINE int32_t z_sched_prio_cmp(struct k_thread *thread_1, struct 
 	int w2 = thread_2->base.prio_weight;
 
 	return (d2 / w2) - (d1 / w1);
+#elif defined CONFIG_736_WSRT
+	uint32_t w1 = thread_1->base.prio_weight;
+	uint32_t w2 = thread_2->base.prio_weight;
+
+	uint32_t t1 = thread_1->base.prio_time_left;
+	uint32_t t2 = thread_2->base.prio_time_left;
+
+	return (t2 / w2) - (t1 / w1);
+#elif defined CONFIG_736_RMS
+	uint32_t t1 = thread_1->base.prio_exec_time;
+	uint32_t t2 = thread_2->base.prio_exec_time;
+
+	return t2 - t1;
 #elif defined CONFIG_SCHED_DEADLINE
 	/* If we assume all deadlines live within the same "half" of
 	 * the 32 bit modulus space (this is a documented API rule),
