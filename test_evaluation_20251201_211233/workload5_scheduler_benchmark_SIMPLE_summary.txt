@@ -1,0 +1,11 @@
+Key metrics:
+  Throughput: 99 iterations/sec
+--- Phase 2: Throughput ---
+  Throughput: 0 iterations/sec
+  Throughput: 0 iterations/sec
+  Throughput: 0 iterations/sec
+  Throughput: 496 iterations/sec
+--- Phase 2: Throughput ---
+  Throughput: 0 iterations/sec
+  Throughput: 0 iterations/sec
+  Throughput: 0 iterations/sec

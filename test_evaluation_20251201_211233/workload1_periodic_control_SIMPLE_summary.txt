@@ -1,0 +1,9 @@
+Key metrics:
+  Executions: 1000
+  Deadline Misses: 0
+  Executions: 450
+  Deadline Misses: 0
+  Executions: 180
+  Deadline Misses: 0
+  Executions: 88
+Total Throughput: 1718 task executions in 10 seconds

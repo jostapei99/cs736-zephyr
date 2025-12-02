@@ -79,16 +79,17 @@ static uint64_t cycles_per_us;
 /* Helper function to simulate work (busy wait) */
 static void simulate_work(uint32_t duration_us)
 {
-	timing_t start, end;
-	uint64_t cycles_needed = duration_us * cycles_per_us;
-	
-	start = timing_counter_get();
-	while (1) {
-		end = timing_counter_get();
-		uint64_t cycles = timing_cycles_get(&start, &end);
-		if (cycles >= cycles_needed) {
-			break;
+	if (cycles_per_us > 1) {
+		/* Use cycle counter if available */
+		uint32_t start_cycles = k_cycle_get_32();
+		uint32_t cycles_needed = duration_us * cycles_per_us;
+		
+		while ((k_cycle_get_32() - start_cycles) < cycles_needed) {
+			/* Busy wait */
 		}
+	} else {
+		/* Fallback to k_busy_wait if cycle counter unavailable */
+		k_busy_wait(duration_us);
 	}
 }
 
@@ -105,8 +106,10 @@ static void sensor_thread_entry(void *p1, void *p2, void *p3)
 	printk("Sensor thread started (Priority: %d, Period: %dms)\n", 
 	       SENSOR_PRIORITY, SENSOR_PERIOD_MS);
 
+	k_busy_wait(1000000);  /* Initial delay to stagger thread starts */
+
 	while (1) {
-		timing_t start_time = timing_counter_get();
+		uint32_t start_cycles = k_cycle_get_32();
 		int64_t actual_wakeup = k_uptime_ticks();
 		
 		/* Calculate latency (how late we woke up) */
@@ -119,6 +122,12 @@ static void sensor_thread_entry(void *p1, void *p2, void *p3)
 			sensor_stats.max_latency_us = latency_us;
 		}
 		
+		/* Debug: Print first few latencies to verify calculation */
+		if (sensor_stats.executions < 5) {
+			printk("[Sensor] Exec %u: next=%lld, actual=%lld, latency_ticks=%lld, latency_us=%llu\n",
+			       sensor_stats.executions, next_wakeup, actual_wakeup, latency_ticks, latency_us);
+		}
+		
 		/* Simulate sensor reading */
 		simulate_work(SENSOR_EXEC_US);
 		
@@ -128,9 +137,17 @@ static void sensor_thread_entry(void *p1, void *p2, void *p3)
 		k_mutex_unlock(&data_mutex);
 		
 		/* Calculate response time */
-		timing_t end_time = timing_counter_get();
-		uint64_t response_cycles = timing_cycles_get(&start_time, &end_time);
-		uint64_t response_us = response_cycles / cycles_per_us;
+		uint32_t end_cycles = k_cycle_get_32();
+		uint64_t response_us = 0;
+		if (cycles_per_us > 1) {
+			uint32_t elapsed_cycles = end_cycles - start_cycles;
+			response_us = elapsed_cycles / cycles_per_us;
+		} else {
+			/* Use tick-based timing as fallback */
+			int64_t end_ticks = k_uptime_ticks();
+			int64_t elapsed_ticks = end_ticks - actual_wakeup;
+			response_us = k_ticks_to_us_ceil64(elapsed_ticks);
+		}
 		sensor_stats.total_response_time_us += response_us;
 		
 		/* Check for deadline miss (response time > period) */
@@ -160,7 +177,7 @@ static void control_thread_entry(void *p1, void *p2, void *p3)
 	       CONTROL_PRIORITY, CONTROL_PERIOD_MS);
 
 	while (1) {
-		timing_t start_time = timing_counter_get();
+		uint32_t start_cycles = k_cycle_get_32();
 		int64_t actual_wakeup = k_uptime_ticks();
 		
 		int64_t latency_ticks = actual_wakeup - next_wakeup;
@@ -185,9 +202,16 @@ static void control_thread_entry(void *p1, void *p2, void *p3)
 		control_output = current_sensor * 2;  /* Simple computation */
 		k_mutex_unlock(&data_mutex);
 		
-		timing_t end_time = timing_counter_get();
-		uint64_t response_cycles = timing_cycles_get(&start_time, &end_time);
-		uint64_t response_us = response_cycles / cycles_per_us;
+		uint32_t end_cycles = k_cycle_get_32();
+		uint64_t response_us = 0;
+		if (cycles_per_us > 1) {
+			uint32_t elapsed_cycles = end_cycles - start_cycles;
+			response_us = elapsed_cycles / cycles_per_us;
+		} else {
+			int64_t end_ticks = k_uptime_ticks();
+			int64_t elapsed_ticks = end_ticks - actual_wakeup;
+			response_us = k_ticks_to_us_ceil64(elapsed_ticks);
+		}
 		control_stats.total_response_time_us += response_us;
 		
 		if (response_us > (CONTROL_PERIOD_MS * 1000)) {
@@ -215,7 +239,7 @@ static void actuator_thread_entry(void *p1, void *p2, void *p3)
 	       ACTUATOR_PRIORITY, ACTUATOR_PERIOD_MS);
 
 	while (1) {
-		timing_t start_time = timing_counter_get();
+		uint32_t start_cycles = k_cycle_get_32();
 		int64_t actual_wakeup = k_uptime_ticks();
 		
 		int64_t latency_ticks = actual_wakeup - next_wakeup;
@@ -235,9 +259,16 @@ static void actuator_thread_entry(void *p1, void *p2, void *p3)
 		/* Simulate actuator control */
 		simulate_work(ACTUATOR_EXEC_US);
 		
-		timing_t end_time = timing_counter_get();
-		uint64_t response_cycles = timing_cycles_get(&start_time, &end_time);
-		uint64_t response_us = response_cycles / cycles_per_us;
+		uint32_t end_cycles = k_cycle_get_32();
+		uint64_t response_us = 0;
+		if (cycles_per_us > 1) {
+			uint32_t elapsed_cycles = end_cycles - start_cycles;
+			response_us = elapsed_cycles / cycles_per_us;
+		} else {
+			int64_t end_ticks = k_uptime_ticks();
+			int64_t elapsed_ticks = end_ticks - actual_wakeup;
+			response_us = k_ticks_to_us_ceil64(elapsed_ticks);
+		}
 		actuator_stats.total_response_time_us += response_us;
 		
 		if (response_us > (ACTUATOR_PERIOD_MS * 1000)) {
@@ -261,15 +292,21 @@ static void log_thread_entry(void *p1, void *p2, void *p3)
 	printk("Background logging thread started (Priority: %d)\n", LOG_PRIORITY);
 
 	while (1) {
-		timing_t start_time = timing_counter_get();
+		uint32_t start_cycles = k_cycle_get_32();
 		
 		/* Simulate logging activity */
 		k_sleep(K_MSEC(100));
 		simulate_work(1000);  /* 1ms of work */
 		
-		timing_t end_time = timing_counter_get();
-		uint64_t response_cycles = timing_cycles_get(&start_time, &end_time);
-		uint64_t response_us = response_cycles / cycles_per_us;
+		uint32_t end_cycles = k_cycle_get_32();
+		uint64_t response_us = 0;
+		if (cycles_per_us > 1) {
+			uint32_t elapsed_cycles = end_cycles - start_cycles;
+			response_us = elapsed_cycles / cycles_per_us;
+		} else {
+			/* For logger, approximate based on sleep time */
+			response_us = 101000;  /* ~100ms sleep + 1ms work */
+		}
 		log_stats.total_response_time_us += response_us;
 		log_stats.executions++;
 		
@@ -333,19 +370,26 @@ int main(void)
 	printk("Testing scheduler with periodic real-time tasks\n");
 	printk("Duration: %d seconds\n\n", TEST_DURATION_MS / 1000);
 	
-	/* Initialize timing */
-	timing_init();
-	timing_start();
-	
-	timing_t start = timing_counter_get();
-	timing_t end;
+	/* Initialize timing - use k_cycle_get_32() instead of timing API */
+	uint32_t start_cycles = k_cycle_get_32();
 	k_busy_wait(1000000);  /* 1 second */
-	end = timing_counter_get();
-	total_cycles = timing_cycles_get(&start, &end);
+	uint32_t end_cycles = k_cycle_get_32();
+	total_cycles = end_cycles - start_cycles;
 	cycles_per_us = total_cycles / 1000000;
 	
-	printk("Timing calibration: %llu cycles per second\n", total_cycles);
-	printk("Cycles per microsecond: %llu\n\n", cycles_per_us);
+	if (cycles_per_us == 0) {
+		printk("WARNING: cycles_per_us is zero! Using fallback value.\n");
+		cycles_per_us = 1;  /* Prevent division by zero */
+	}
+	
+	printk("Timing calibration: %llu cycles per second (using k_cycle_get_32)\n", total_cycles);
+	printk("Cycles per microsecond: %llu\n", cycles_per_us);
+	
+	if (total_cycles == 0) {
+		printk("ERROR: Timing subsystem not working! total_cycles = 0\n");
+		printk("This may be a QEMU/hardware issue. Results will be inaccurate.\n");
+	}
+	printk("\n");
 	
 	/* Initialize mutex */
 	k_mutex_init(&data_mutex);

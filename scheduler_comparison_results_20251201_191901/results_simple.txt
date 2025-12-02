@@ -1,0 +1,2 @@
+-- west build: running target run
+[0/1] To exit from QEMU enter: 'CTRL+a, x'[QEMU] CPU: cortex-m3

@@ -1,6 +1,6 @@
 # Scheduler Evaluation Workloads for Zephyr RTOS
 
-This directory contains 4 comprehensive workloads designed to evaluate and compare different scheduling algorithms in Zephyr RTOS on embedded systems.
+This directory contains 5 comprehensive workloads designed to evaluate and compare different scheduling algorithms in Zephyr RTOS on embedded systems.
 
 ## Overview
 
@@ -9,6 +9,13 @@ These workloads are specifically designed to stress-test schedulers and measure 
 - **Tardiness**: Deadline misses and how late tasks complete
 - **Throughput**: Total work completed
 - **Schedulability**: Can the system meet all deadlines?
+
+## Quick Start
+
+**New to scheduler evaluation?** Start here:
+1. **Run Workload 5** (Scheduler Benchmark) to choose your scheduler
+2. **Validate with Workloads 1-4** based on your application type
+3. **Analyze results** using the provided templates
 
 ## Workload Descriptions
 
@@ -87,6 +94,37 @@ These workloads are specifically designed to stress-test schedulers and measure 
 **Best Scheduler**: DEADLINE (EDF) - can achieve higher utilization
 
 ---
+
+### Workload 5: Scheduler Scaling Benchmark ⭐ NEW
+**Application Domain**: Scheduler selection and performance analysis
+
+**Characteristics**:
+- Systematic benchmark testing scheduler algorithms
+- Variable thread counts (1, 5, 10, 20, 30) to test scalability
+- Four test phases: latency, throughput, yield, priority
+- Pure scheduler performance measurement
+
+**Test Phases**:
+- Phase 1: Wake-up latency measurement
+- Phase 2: Maximum throughput (context switches/sec)
+- Phase 3: Yield behavior (cooperative scheduling)
+- Phase 4: Priority enforcement correctness
+
+**Best Scheduler**: Run this to find out! This workload helps you choose.
+
+**Key Difference**: Unlike workloads 1-4 which simulate applications, this workload isolates and measures pure scheduler performance.
+
+---
+
+## Choosing the Right Workload
+
+| If Your System Is... | Start With Workload... |
+|---------------------|------------------------|
+| Not sure which scheduler to use | **5 (Benchmark)** ← Start here! |
+| Periodic control loops | 1 (Periodic Control) |
+| Network/interrupt heavy | 2 (Event-Driven) |
+| Safety-critical with modes | 3 (Mixed Criticality) |
+| Needs deadline guarantees | 4 (Deadline Sporadic) |
 
 ## Building and Running
 
