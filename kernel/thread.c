@@ -699,6 +699,13 @@ char *z_setup_new_thread(struct k_thread *new_thread,
 #ifdef CONFIG_SCHED_DEADLINE
 	new_thread->base.prio_deadline = 0;
 #endif /* CONFIG_SCHED_DEADLINE */
+#ifdef CONFIG_736
+	new_thread->base.prio_exec_time = 0;
+	new_thread->base.prio_weight = 1;
+#ifdef CONFIG_736_TIME_LEFT
+	new_thread->base.prio_time_left = 0;
+#endif /* CONFIG_736_TIME_LEFT */
+#endif /* CONFIG_736 */
 	new_thread->resource_pool = _current->resource_pool;
 
 #ifdef CONFIG_SMP
@@ -708,7 +715,7 @@ char *z_setup_new_thread(struct k_thread *new_thread,
 #ifdef CONFIG_SCHED_THREAD_USAGE
 	new_thread->base.usage = (struct k_cycle_stats) {};
 	new_thread->base.usage.track_usage =
-		CONFIG_SCHED_THREAD_USAGE_AUTO_ENABLE;
+		0;
 #endif /* CONFIG_SCHED_THREAD_USAGE */
 
 	SYS_PORT_TRACING_OBJ_FUNC(k_thread, create, new_thread);
@@ -997,6 +1004,7 @@ void z_thread_mark_switched_out(void)
 {
 #if defined(CONFIG_SCHED_THREAD_USAGE) && !defined(CONFIG_USE_SWITCH)
 	z_sched_usage_stop();
+	// Reschedule thread ?
 #endif /*CONFIG_SCHED_THREAD_USAGE && !CONFIG_USE_SWITCH */
 
 #ifdef CONFIG_TRACING
