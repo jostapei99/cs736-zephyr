@@ -119,6 +119,29 @@ config SCHED_DEADLINE
 	  single priority will choose the next expiring deadline and
 	  not simply the least recently added thread.
 
+config 736
+	bool "Flag for CS736"
+	depends on SCHED_DEADLINE
+	help
+		Adds whatever we need for dynamic scheduling. Will probably
+		need more flags to set algorithm. (They can depend on this config
+		with "depends on 736")
+
+config 736_TIME_LEFT
+	bool "Flag to track how much exec time is left"
+	depends on 736 && SCHED_THREAD_USAGE && THREAD_RUNTIME_STATS
+	help
+		Adds tracking to thread to see how much time is left
+
+config 736_MOD_EDF
+	bool "Use modified EDF"
+
+config 736_WSRT
+	bool "Use Weighted Shortest Remaining Time scheduler"
+
+config 736_RMS
+	bool "Use Rate Monotonic scheduler"
+
 config SCHED_CPU_MASK
 	bool "CPU mask affinity/pinning API"
 	depends on SCHED_SIMPLE

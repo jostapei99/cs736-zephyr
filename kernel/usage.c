@@ -60,6 +60,17 @@ static void sched_cpu_update_usage(struct _cpu *cpu, uint32_t cycles)
 
 static void sched_thread_update_usage(struct k_thread *thread, uint32_t cycles)
 {
+	
+#ifdef CONFIG_736_TIME_LEFT
+	if (thread->base.usage.track_usage) {
+		if (thread->base.prio_time_left < cycles) {
+			thread->base.prio_time_left = 0;
+		} else {
+			thread->base.prio_time_left -= cycles;
+		}
+	}
+	
+#endif
 	thread->base.usage.total += cycles;
 
 #ifdef CONFIG_SCHED_THREAD_USAGE_ANALYSIS
