@@ -128,3 +128,8 @@ TextEncoding.txt
 YAMLLint.txt
 ZephyrModuleFile.txt
 # zephyr-keep-sorted-stop
+
+
+app/advanced_eval/results/*
+app/simple_eval_step1/results/*
+app/simple_eval_step2/results/*
