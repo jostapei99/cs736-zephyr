@@ -119,28 +119,150 @@ config SCHED_DEADLINE
 	  single priority will choose the next expiring deadline and
 	  not simply the least recently added thread.
 
-config 736
-	bool "Flag for CS736"
+choice
+	prompt "Real-Time Scheduling Policy"
+	default SCHED_DEADLINE
 	depends on SCHED_DEADLINE
 	help
-		Adds whatever we need for dynamic scheduling. Will probably
-		need more flags to set algorithm. (They can depend on this config
-		with "depends on 736")
+	  Select the real-time scheduling policy to use for threads
+	  with the same base priority level.
 
-config 736_TIME_LEFT
-	bool "Flag to track how much exec time is left"
-	depends on 736 && SCHED_THREAD_USAGE && THREAD_RUNTIME_STATS
+config SCHED_DEADLINE_ONLY
+	bool "Standard EDF (Earliest Deadline First)"
 	help
-		Adds tracking to thread to see how much time is left
+	  Use standard EDF scheduling based on absolute deadlines.
+	  Earlier deadlines have higher priority within the same
+	  priority level. This is the baseline Zephyr implementation.
 
 config 736_MOD_EDF
-	bool "Use modified EDF"
+	bool "Weighted EDF"
+	select 736
+	help
+	  Use Weighted EDF scheduling based on deadline/weight ratio.
+	  Threads with lower (deadline / weight) ratios are scheduled first.
+	  This allows differentiating task importance: higher weight threads
+	  are treated as having effectively earlier deadlines.
+
+	  Use k_thread_weight_set() to set thread weights (default: 1).
 
 config 736_WSRT
-	bool "Use Weighted Shortest Remaining Time scheduler"
+	bool "Weighted Shortest Remaining Time (WSRT)"
+	select 736
+	select 736_TIME_LEFT
+	help
+	  Use WSRT scheduling based on time_left/weight ratio.
+	  Threads with lower (time_left / weight) ratios are scheduled first.
+	  This optimizes response time while considering task importance.
+
+	  Requires CONFIG_SCHED_THREAD_USAGE and CONFIG_THREAD_RUNTIME_STATS
+	  for runtime tracking. Use k_thread_weight_set() and
+	  k_thread_exec_time_set() to configure threads.
 
 config 736_RMS
-	bool "Use Rate Monotonic scheduler"
+	bool "Rate Monotonic Scheduling (RMS)"
+	select 736
+	help
+	  Use RMS-style scheduling based on execution time.
+	  Threads with shorter execution times have higher priority.
+	  This is a simplified RMS implementation suitable for periodic tasks.
+
+	  Use k_thread_exec_time_set() to set expected execution times.
+
+config 736_LLF
+	bool "Least Laxity First (LLF)"
+	select 736
+	select 736_TIME_LEFT
+	help
+	  Use LLF scheduling based on laxity (slack time).
+	  Laxity = deadline - remaining_time - current_time
+	  Threads with lower laxity (less slack) have higher priority.
+
+	  This is a dynamic priority algorithm that adapts to execution
+	  progress. It can detect imminent deadline misses earlier than EDF
+	  but may cause more context switches.
+
+	  Requires CONFIG_SCHED_THREAD_USAGE and CONFIG_THREAD_RUNTIME_STATS
+	  for tracking remaining execution time.
+
+config 736_PFS
+	bool "Proportional Fair Scheduling (PFS)"
+	select 736
+	help
+	  Use Proportional Fair Scheduling for fairness-oriented scheduling.
+	  Each thread's virtual runtime is tracked, and threads with the
+	  lowest virtual_runtime/weight ratio are scheduled first.
+
+	  This ensures fair CPU allocation proportional to thread weights,
+	  preventing starvation while allowing priority differentiation.
+	  Useful for mixed workloads (RT + best-effort).
+
+	  Use k_thread_weight_set() to set fairness weights.
+
+endchoice
+
+config 736
+	bool "Custom RT Scheduling Infrastructure"
+	depends on SCHED_DEADLINE
+	help
+	  Enable infrastructure for custom real-time scheduling algorithms.
+	  This adds weight and exec_time fields to thread structures and
+	  provides syscalls to configure them:
+	    - k_thread_weight_set(tid, weight)
+	    - k_thread_exec_time_set(tid, exec_time)
+
+	  This is automatically selected when choosing a custom scheduler.
+
+config 736_TIME_LEFT
+	bool "Track Remaining Execution Time"
+	depends on 736 && SCHED_THREAD_USAGE && THREAD_RUNTIME_STATS
+	help
+	  Track how much execution time is left for each thread.
+	  This is required for WSRT scheduling and can be useful
+	  for other scheduling analysis.
+
+	  The prio_time_left field is reset to prio_exec_time when
+	  a new deadline is set.
+
+config 736_RT_STATS
+	bool "Real-Time Scheduler Statistics"
+	depends on 736
+	help
+	  Enable comprehensive statistics collection for real-time
+	  scheduling analysis. This adds per-thread tracking of:
+	    - Activation count (job releases)
+	    - Preemption count
+	    - Context switch count
+	    - Deadline misses
+	    - Response time (min/max/total)
+	    - Waiting time
+	    - Execution time tracking
+	    - Priority inversions
+
+	  Statistics can be accessed via k_thread_rt_stats_get().
+	  Useful for workload analysis, debugging, and research.
+
+config 736_RT_STATS_DETAILED
+	bool "Detailed RT Statistics (timestamps)"
+	depends on 736_RT_STATS
+	help
+	  Track detailed timestamps for scheduling events:
+	    - Last activation time
+	    - Last ready time (when added to ready queue)
+	    - Last start time (when dispatched to CPU)
+	    - Last completion time
+
+	  These enable fine-grained analysis but add overhead.
+
+config 736_RT_STATS_SQUARED
+	bool "RT Statistics Squared Sums (for variance/jitter)"
+	depends on 736_RT_STATS
+	help
+	  Track squared sums for calculating variance and jitter:
+	    - Sum of response_time²
+	    - Sum of waiting_time²
+
+	  Enables calculation of standard deviation and jitter
+	  metrics. Adds minimal overhead (one multiply per job).
 
 config SCHED_CPU_MASK
 	bool "CPU mask affinity/pinning API"

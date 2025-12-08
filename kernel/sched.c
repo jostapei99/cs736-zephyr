@@ -285,6 +285,13 @@ static ALWAYS_INLINE void update_cache(int preempt_ok)
 #endif /* CONFIG_TIMESLICING */
 		update_metairq_preempt(thread);
 		_kernel.ready_q.cache = thread;
+		
+#ifdef CONFIG_736_RT_STATS
+		/* Track preemption: _current is being preempted by thread */
+		if (thread != _current && _current != NULL) {
+			_current->base.rt_stats.preemptions++;
+		}
+#endif
 	} else {
 		_kernel.ready_q.cache = _current;
 	}
@@ -333,6 +340,11 @@ static void ready_thread(struct k_thread *thread)
 	 */
 	if (!z_is_thread_queued(thread) && z_is_thread_ready(thread)) {
 		SYS_PORT_TRACING_OBJ_FUNC(k_thread, sched_ready, thread);
+
+#ifdef CONFIG_736_RT_STATS_DETAILED
+		/* Record timestamp when thread enters ready queue */
+		thread->base.rt_stats.last_ready_time = k_uptime_get();
+#endif
 
 		queue_thread(thread);
 		update_cache(0);
@@ -979,6 +991,88 @@ static inline void z_vrfy_k_thread_priority_set(k_tid_t thread, int prio)
 }
 #include <zephyr/syscalls/k_thread_priority_set_mrsh.c>
 #endif /* CONFIG_USERSPACE */
+
+#ifdef CONFIG_736_RT_STATS
+int z_impl_k_thread_rt_stats_get(k_tid_t tid, struct k_thread_rt_stats *stats)
+{
+	struct k_thread *thread = tid ? tid : _current;
+	
+	if (!stats) {
+		return -EINVAL;
+	}
+	
+	K_SPINLOCK(&_sched_spinlock) {
+		/* Copy statistics from thread structure to user structure */
+		stats->activations = thread->base.rt_stats.activations;
+		stats->preemptions = thread->base.rt_stats.preemptions;
+		stats->context_switches = thread->base.rt_stats.context_switches;
+		stats->deadline_misses = thread->base.rt_stats.deadline_misses;
+		stats->priority_inversions = thread->base.rt_stats.priority_inversions;
+		
+		stats->total_response_time = thread->base.rt_stats.total_response_time;
+		stats->total_waiting_time = thread->base.rt_stats.total_waiting_time;
+		stats->total_exec_time = thread->base.rt_stats.total_exec_time;
+		stats->min_response_time = thread->base.rt_stats.min_response_time;
+		stats->max_response_time = thread->base.rt_stats.max_response_time;
+		stats->min_waiting_time = thread->base.rt_stats.min_waiting_time;
+		stats->max_waiting_time = thread->base.rt_stats.max_waiting_time;
+
+#ifdef CONFIG_736_RT_STATS_SQUARED
+		stats->sum_response_time_sq = thread->base.rt_stats.sum_response_time_sq;
+		stats->sum_waiting_time_sq = thread->base.rt_stats.sum_waiting_time_sq;
+#endif
+
+#ifdef CONFIG_736_RT_STATS_DETAILED
+		stats->last_activation_time = thread->base.rt_stats.last_activation_time;
+		stats->last_ready_time = thread->base.rt_stats.last_ready_time;
+		stats->last_start_time = thread->base.rt_stats.last_start_time;
+		stats->last_completion_time = thread->base.rt_stats.last_completion_time;
+#endif
+	}
+	
+	return 0;
+}
+
+int z_impl_k_thread_rt_stats_reset(k_tid_t tid)
+{
+	struct k_thread *thread = tid ? tid : _current;
+	
+	K_SPINLOCK(&_sched_spinlock) {
+		memset(&thread->base.rt_stats, 0, sizeof(thread->base.rt_stats));
+	}
+	
+	return 0;
+}
+
+void z_impl_k_thread_rt_stats_activation(k_tid_t tid)
+{
+	struct k_thread *thread = tid ? tid : _current;
+	
+	K_SPINLOCK(&_sched_spinlock) {
+		thread->base.rt_stats.activations++;
+		
+#ifdef CONFIG_736_RT_STATS_DETAILED
+		thread->base.rt_stats.last_activation_time = k_uptime_get();
+#endif
+	}
+}
+
+void z_impl_k_thread_rt_stats_deadline_miss(k_tid_t tid)
+{
+	struct k_thread *thread = tid ? tid : _current;
+	
+	K_SPINLOCK(&_sched_spinlock) {
+		thread->base.rt_stats.deadline_misses++;
+	}
+}
+
+#ifdef CONFIG_USERSPACE
+#include <zephyr/syscalls/k_thread_rt_stats_get_mrsh.c>
+#include <zephyr/syscalls/k_thread_rt_stats_reset_mrsh.c>
+#include <zephyr/syscalls/k_thread_rt_stats_activation_mrsh.c>
+#include <zephyr/syscalls/k_thread_rt_stats_deadline_miss_mrsh.c>
+#endif /* CONFIG_USERSPACE */
+#endif /* CONFIG_736_RT_STATS */
 
 #ifdef CONFIG_736
 void z_impl_k_thread_weight_set(k_tid_t tid, int weight)

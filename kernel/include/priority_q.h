@@ -62,6 +62,135 @@ static ALWAYS_INLINE void z_priq_simple_init(sys_dlist_t *pq)
 	sys_dlist_init(pq);
 }
 
+/* Custom scheduler algorithm comparison functions */
+#ifdef CONFIG_736
+
+/**
+ * Weighted EDF - schedules based on deadline/weight ratio
+ * Lower ratio = higher priority (sooner effective deadline)
+ */
+static ALWAYS_INLINE int32_t z_sched_cmp_weighted_edf(struct k_thread *t1, struct k_thread *t2)
+{
+	uint32_t d1 = t1->base.prio_deadline;
+	uint32_t d2 = t2->base.prio_deadline;
+	int w1 = t1->base.prio_weight;
+	int w2 = t2->base.prio_weight;
+
+	/* Avoid division by zero - treat zero weight as weight of 1 */
+	if (w1 == 0) w1 = 1;
+	if (w2 == 0) w2 = 1;
+
+	return (d2 / w2) - (d1 / w1);
+}
+
+/**
+ * Weighted Shortest Remaining Time (WSRT)
+ * Schedules based on time_left/weight ratio
+ * Lower ratio = higher priority (less weighted time remaining)
+ */
+static ALWAYS_INLINE int32_t z_sched_cmp_wsrt(struct k_thread *t1, struct k_thread *t2)
+{
+	uint32_t w1 = t1->base.prio_weight;
+	uint32_t w2 = t2->base.prio_weight;
+	uint32_t tl1 = t1->base.prio_time_left;
+	uint32_t tl2 = t2->base.prio_time_left;
+
+	/* Avoid division by zero */
+	if (w1 == 0) w1 = 1;
+	if (w2 == 0) w2 = 1;
+
+	return (tl2 / w2) - (tl1 / w1);
+}
+
+/**
+ * Rate Monotonic Scheduling (RMS)
+ * Schedules based on execution time (shorter = higher priority)
+ * In practice, period would be better, but exec_time is used here
+ */
+static ALWAYS_INLINE int32_t z_sched_cmp_rms(struct k_thread *t1, struct k_thread *t2)
+{
+	uint32_t et1 = t1->base.prio_exec_time;
+	uint32_t et2 = t2->base.prio_exec_time;
+
+	return et2 - et1;
+}
+
+/**
+ * Least Laxity First (LLF)
+ * Schedules based on slack time: laxity = deadline - time_left - current_time
+ * Lower laxity = higher priority (less slack time before deadline)
+ * Note: This is a simplified version using time_left as remaining time estimate
+ */
+static ALWAYS_INLINE int32_t z_sched_cmp_llf(struct k_thread *t1, struct k_thread *t2)
+{
+	uint32_t d1 = t1->base.prio_deadline;
+	uint32_t d2 = t2->base.prio_deadline;
+	uint32_t tl1 = t1->base.prio_time_left;
+	uint32_t tl2 = t2->base.prio_time_left;
+
+	/* Laxity = deadline - time_left
+	 * We don't subtract current_time since it's the same for both threads
+	 * Lower laxity (less slack) = higher priority = return positive
+	 */
+	int32_t laxity1 = (int32_t)(d1 - tl1);
+	int32_t laxity2 = (int32_t)(d2 - tl2);
+
+	return laxity2 - laxity1;
+}
+
+/**
+ * Proportional Fair Scheduling (PFS) / Weighted Fair Queuing
+ * Schedules based on virtual runtime to ensure fairness
+ * Threads with least virtual_runtime/weight are scheduled first
+ * Note: Using exec_time as accumulated runtime proxy
+ */
+static ALWAYS_INLINE int32_t z_sched_cmp_pfs(struct k_thread *t1, struct k_thread *t2)
+{
+	uint32_t runtime1 = t1->base.prio_exec_time;
+	uint32_t runtime2 = t2->base.prio_exec_time;
+	int w1 = t1->base.prio_weight;
+	int w2 = t2->base.prio_weight;
+
+	/* Avoid division by zero */
+	if (w1 == 0) w1 = 1;
+	if (w2 == 0) w2 = 1;
+
+	/* Thread with lower virtual_runtime/weight runs first
+	 * For fairness, we want to give CPU to thread that has received
+	 * less weighted CPU time. Return positive if t1 should run first.
+	 */
+	return (runtime1 / w1) - (runtime2 / w2);
+}
+
+#endif /* CONFIG_736 */
+
+/**
+ * Standard EDF - schedules based on absolute deadline
+ * Earlier deadline = higher priority
+ */
+static ALWAYS_INLINE int32_t z_sched_cmp_edf(struct k_thread *t1, struct k_thread *t2)
+{
+	/* If we assume all deadlines live within the same "half" of
+	 * the 32 bit modulus space (this is a documented API rule),
+	 * then the latest deadline in the queue minus the earliest is
+	 * guaranteed to be (2's complement) non-negative.  We can
+	 * leverage that to compare the values without having to check
+	 * the current time.
+	 */
+	uint32_t d1 = t1->base.prio_deadline;
+	uint32_t d2 = t2->base.prio_deadline;
+
+	if (d1 != d2) {
+		/* Sooner deadline means higher effective priority.
+		 * Doing the calculation with unsigned types and casting
+		 * to signed isn't perfect, but at least reduces this
+		 * from UB on overflow to impdef.
+		 */
+		return (int32_t)(d2 - d1);
+	}
+	return 0;
+}
+
 /*
  * Return value same as e.g. memcmp
  * > 0 -> thread 1 priority  > thread 2 priority
@@ -76,51 +205,27 @@ static ALWAYS_INLINE int32_t z_sched_prio_cmp(struct k_thread *thread_1, struct 
 	int32_t b1 = thread_1->base.prio;
 	int32_t b2 = thread_2->base.prio;
 
+	/* First, compare base priority levels */
 	if (b1 != b2) {
 		return b2 - b1;
 	}
+
+	/* Within same priority, apply scheduling algorithm */
 #ifdef CONFIG_736_MOD_EDF
-	uint32_t d1 = thread_1->base.prio_deadline;
-	uint32_t d2 = thread_2->base.prio_deadline;
-
-	int w1 = thread_1->base.prio_weight;
-	int w2 = thread_2->base.prio_weight;
-
-	return (d2 / w2) - (d1 / w1);
+	return z_sched_cmp_weighted_edf(thread_1, thread_2);
 #elif defined CONFIG_736_WSRT
-	uint32_t w1 = thread_1->base.prio_weight;
-	uint32_t w2 = thread_2->base.prio_weight;
-
-	uint32_t t1 = thread_1->base.prio_time_left;
-	uint32_t t2 = thread_2->base.prio_time_left;
-
-	return (t2 / w2) - (t1 / w1);
+	return z_sched_cmp_wsrt(thread_1, thread_2);
 #elif defined CONFIG_736_RMS
-	uint32_t t1 = thread_1->base.prio_exec_time;
-	uint32_t t2 = thread_2->base.prio_exec_time;
-
-	return t2 - t1;
+	return z_sched_cmp_rms(thread_1, thread_2);
+#elif defined CONFIG_736_LLF
+	return z_sched_cmp_llf(thread_1, thread_2);
+#elif defined CONFIG_736_PFS
+	return z_sched_cmp_pfs(thread_1, thread_2);
 #elif defined CONFIG_SCHED_DEADLINE
-	/* If we assume all deadlines live within the same "half" of
-	 * the 32 bit modulus space (this is a documented API rule),
-	 * then the latest deadline in the queue minus the earliest is
-	 * guaranteed to be (2's complement) non-negative.  We can
-	 * leverage that to compare the values without having to check
-	 * the current time.
-	 */
-	uint32_t d1 = thread_1->base.prio_deadline;
-	uint32_t d2 = thread_2->base.prio_deadline;
-
-	if (d1 != d2) {
-		/* Sooner deadline means higher effective priority.
-		 * Doing the calculation with unsigned types and casting
-		 * to signed isn't perfect, but at least reduces this
-		 * from UB on overflow to impdef.
-		 */
-		return (int32_t)(d2 - d1);
-	}
-#endif /* CONFIG_SCHED_DEADLINE */
+	return z_sched_cmp_edf(thread_1, thread_2);
+#else
 	return 0;
+#endif
 }
 
 static ALWAYS_INLINE void z_priq_simple_add(sys_dlist_t *pq, struct k_thread *thread)

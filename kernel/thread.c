@@ -995,6 +995,14 @@ void z_thread_mark_switched_in(void)
 	z_sched_usage_start(_current);
 #endif /* CONFIG_SCHED_THREAD_USAGE && !CONFIG_USE_SWITCH */
 
+#ifdef CONFIG_736_RT_STATS
+	/* Track context switch and record start time */
+	_current->base.rt_stats.context_switches++;
+#ifdef CONFIG_736_RT_STATS_DETAILED
+	_current->base.rt_stats.last_start_time = k_uptime_get();
+#endif
+#endif /* CONFIG_736_RT_STATS */
+
 #ifdef CONFIG_TRACING
 	SYS_PORT_TRACING_FUNC(k_thread, switched_in);
 #endif /* CONFIG_TRACING */
@@ -1006,6 +1014,14 @@ void z_thread_mark_switched_out(void)
 	z_sched_usage_stop();
 	// Reschedule thread ?
 #endif /*CONFIG_SCHED_THREAD_USAGE && !CONFIG_USE_SWITCH */
+
+#ifdef CONFIG_736_RT_STATS_DETAILED
+	/* Record completion time when thread is switched out */
+	if (_current != NULL && 
+	    (_current->base.thread_state & _THREAD_DUMMY) == 0) {
+		_current->base.rt_stats.last_completion_time = k_uptime_get();
+	}
+#endif /* CONFIG_736_RT_STATS_DETAILED */
 
 #ifdef CONFIG_TRACING
 #ifdef CONFIG_THREAD_LOCAL_STORAGE

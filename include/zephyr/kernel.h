@@ -6682,6 +6682,7 @@ void k_sys_runtime_stats_disable(void);
 #endif
 
 #include <zephyr/tracing/tracing.h>
+#include <zephyr/kernel/rt_stats.h>
 #include <zephyr/syscalls/kernel.h>
 
 #endif /* !_ASMLANGUAGE */
