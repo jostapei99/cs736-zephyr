@@ -1023,11 +1023,6 @@ __syscall void k_thread_deadline_set(k_tid_t thread, int deadline);
 __syscall void k_thread_absolute_deadline_set(k_tid_t thread, int deadline);
 #endif
 
-#ifdef CONFIG_736
-__syscall void k_thread_weight_set(k_tid_t tid, int weight);
-__syscall void k_thread_exec_time_set(k_tid_t tid, int exec_time); // I'm thinking time will be in cycles like deadline
-#endif
-
 /**
  * @brief Invoke the scheduler
  *
@@ -6682,8 +6677,18 @@ void k_sys_runtime_stats_disable(void);
 #endif
 
 #include <zephyr/tracing/tracing.h>
-#include <zephyr/kernel/rt_stats.h>
+
+#ifdef CONFIG_736_ADD_ONS
+#include <zephyr/kernel/sched_rt.h>
+#endif
+
+/* CS736: Disabled custom RT stats header */
+/* #include <zephyr/kernel/rt_stats.h> */
 #include <zephyr/syscalls/kernel.h>
+
+#ifdef CONFIG_736_ADD_ONS
+#include <zephyr/syscalls/sched_rt.h>
+#endif
 
 #endif /* !_ASMLANGUAGE */
 

@@ -41,6 +41,11 @@ zephyr_syscall_header_ifdef(
   ${ZEPHYR_BASE}/include/zephyr/kernel/mm/demand_paging.h
 )
 
+zephyr_syscall_header_ifdef(
+  CONFIG_736_ADD_ONS
+  ${ZEPHYR_BASE}/include/zephyr/kernel/sched_rt.h
+)
+
 # If a pre-built static library containing kernel code exists in
 # this directory, libkernel.a, link it with the application code
 # instead of building from source.
@@ -131,6 +136,7 @@ target_sources_ifdef(CONFIG_POLL                  kernel PRIVATE poll.c)
 target_sources_ifdef(CONFIG_EVENTS                kernel PRIVATE events.c)
 target_sources_ifdef(CONFIG_SCHED_THREAD_USAGE    kernel PRIVATE usage.c)
 target_sources_ifdef(CONFIG_OBJ_CORE              kernel PRIVATE obj_core.c)
+target_sources_ifdef(CONFIG_736_ADD_ONS           kernel PRIVATE sched_rt.c)
 
 if(${CONFIG_KERNEL_MEM_POOL})
   target_sources(kernel PRIVATE mempool.c)

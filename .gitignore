@@ -135,3 +135,5 @@ app/simple_eval_step1/results/*
 app/simple_eval_step2/results/*
 
 app.backup
+
+app/scheduler_evaluation/results/*

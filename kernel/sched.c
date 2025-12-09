@@ -30,6 +30,44 @@ extern struct k_thread *pending_current;
 
 struct k_spinlock _sched_spinlock;
 
+#ifdef CONFIG_736_SCHED_STATS
+	struct k_thread_sched_stats {
+		/* Scheduler algorithm overhead */
+		uint64_t total_sched_overhead_cycles;  	/* Total cycles spent in scheduler */
+		uint64_t sched_invocations;				/* Number of scheduling decisions */
+		uint32_t min_sched_overhead;            /* Fastest scheduling decision */
+		uint32_t max_sched_overhead;            /* Slowest scheduling decision */
+
+		/* Context switch stats */
+		uint64_t total_context_switches;        /* Total number of context switches */
+		uint64_t total_context_switch_cycles;   /* Total cycles spent in context switches */
+
+		/* Ready queue stats */
+		uint64_t max_ready_q_length;          	/* Maximum length of ready queue observed */
+		uint64_t total_ready_q_samples;         /* For average calculation */
+		uint64_t sum_ready_q_length;            /* Sum for average */
+
+		/* Deadline miss stats */
+		uint32_t total_deadline_misses;			/* Total number of deadline misses */
+		uint32_t deadline_miss_by_thread[CONFIG_MAX_THREAD_COUNT]; 
+
+		/* Algorithm specific metrics */
+		uint32_t priority_reorderings;          /* Dynamic prioriy changes (LLF, WSRT) */
+		uint32_t weight_changes;                /* Weight changes (Weighted EDF, PFS) */
+
+		/* Performance metrics */
+		uint64_t total_cpu_utilization;			/* Accumulated CPU busy time */
+		uint64_t total_idle_time;				/* Accumulated CPU idle time */
+
+#ifdef CONFIG_736_SCHED_STATS_HISTOGRAM
+		/* Latency histograms (configurable bin sizes) */
+		uint32_t response_time_histogram[CONFIG_736_HIST_BINS];
+		uint32_t waiting_time_histogram[CONFIG_736_HIST_BINS];
+		uint32_t sched_overhead_histogram[CONFIG_736_HIST_BINS];
+#endif /* CONFIG_736_SCHED_STATS_HISTOGRAM */
+	} k_sched_stats;
+#endif /* CONFIG_736_SCHED_STATS */
+
 /* Storage to "complete" the context switch from an invalid/incomplete thread
  * context (ex: exiting an ISR that aborted _current)
  */
@@ -876,6 +914,58 @@ void *z_get_next_switch_handle(void *interrupted)
 		if (old_thread != new_thread) {
 			uint8_t  cpu_id;
 
+#ifdef CONFIG_736_RT_STATS_DETAILED
+			/* Track when the new thread starts executing */
+			uint64_t now = k_uptime_get();
+			new_thread->base.rt_stats.last_start_time = now;
+			
+			/* Calculate response time if there was an activation */
+			/* Response time = time from activation to first dispatch */
+			if (new_thread->base.rt_stats.last_activation_time > 0 &&
+			    new_thread->base.rt_stats.last_activation_time <= now) {
+				uint32_t response_time = (uint32_t)(now - new_thread->base.rt_stats.last_activation_time);
+				new_thread->base.rt_stats.total_response_time += response_time;
+				
+				if (new_thread->base.rt_stats.min_response_time == 0 ||
+				    response_time < new_thread->base.rt_stats.min_response_time) {
+					new_thread->base.rt_stats.min_response_time = response_time;
+				}
+				if (response_time > new_thread->base.rt_stats.max_response_time) {
+					new_thread->base.rt_stats.max_response_time = response_time;
+				}
+				
+#ifdef CONFIG_736_RT_STATS_SQUARED
+				new_thread->base.rt_stats.sum_response_time_sq += 
+					(uint64_t)response_time * response_time;
+#endif
+				/* Clear activation time - response calculated */
+				new_thread->base.rt_stats.last_activation_time = 0;
+			}
+			
+			/* Calculate waiting time: ready -> running */
+			/* Only if we entered ready queue (not waking from sleep directly) */
+			if (new_thread->base.rt_stats.last_ready_time > 0 &&
+			    new_thread->base.rt_stats.last_ready_time <= now) {
+				uint32_t waiting_time = (uint32_t)(now - new_thread->base.rt_stats.last_ready_time);
+				new_thread->base.rt_stats.total_waiting_time += waiting_time;
+				
+				if (new_thread->base.rt_stats.min_waiting_time == 0 ||
+				    waiting_time < new_thread->base.rt_stats.min_waiting_time) {
+					new_thread->base.rt_stats.min_waiting_time = waiting_time;
+				}
+				if (waiting_time > new_thread->base.rt_stats.max_waiting_time) {
+					new_thread->base.rt_stats.max_waiting_time = waiting_time;
+				}
+				
+#ifdef CONFIG_736_RT_STATS_SQUARED
+				new_thread->base.rt_stats.sum_waiting_time_sq += 
+					(uint64_t)waiting_time * waiting_time;
+#endif
+				/* Clear ready time after calculating waiting time */
+				new_thread->base.rt_stats.last_ready_time = 0;
+			}
+#endif /* CONFIG_736_RT_STATS_DETAILED */
+
 			update_metairq_preempt(new_thread);
 			z_sched_switch_spin(new_thread);
 			arch_cohere_stacks(old_thread, interrupted, new_thread);
@@ -922,9 +1012,63 @@ void *z_get_next_switch_handle(void *interrupted)
 	signal_pending_ipi();
 	return ret;
 #else
-	z_sched_usage_switch(_kernel.ready_q.cache);
+	struct k_thread *new_thread = _kernel.ready_q.cache;
+	
+#ifdef CONFIG_736_RT_STATS_DETAILED
+	if (new_thread != _current) {
+		/* Track when the new thread starts executing */
+		uint64_t now = k_uptime_get();
+		new_thread->base.rt_stats.last_start_time = now;
+		
+		/* Calculate response time if there was an activation */
+		if (new_thread->base.rt_stats.last_activation_time > 0 &&
+		    new_thread->base.rt_stats.last_activation_time <= now) {
+			uint32_t response_time = (uint32_t)(now - new_thread->base.rt_stats.last_activation_time);
+			new_thread->base.rt_stats.total_response_time += response_time;
+			
+			if (new_thread->base.rt_stats.min_response_time == 0 ||
+			    response_time < new_thread->base.rt_stats.min_response_time) {
+				new_thread->base.rt_stats.min_response_time = response_time;
+			}
+			if (response_time > new_thread->base.rt_stats.max_response_time) {
+				new_thread->base.rt_stats.max_response_time = response_time;
+			}
+			
+#ifdef CONFIG_736_RT_STATS_SQUARED
+			new_thread->base.rt_stats.sum_response_time_sq += 
+				(uint64_t)response_time * response_time;
+#endif
+			/* Clear activation time - response calculated */
+			new_thread->base.rt_stats.last_activation_time = 0;
+		}
+		
+		/* Calculate waiting time: ready -> running */
+		if (new_thread->base.rt_stats.last_ready_time > 0 &&
+		    new_thread->base.rt_stats.last_ready_time <= now) {
+			uint32_t waiting_time = (uint32_t)(now - new_thread->base.rt_stats.last_ready_time);
+			new_thread->base.rt_stats.total_waiting_time += waiting_time;
+			
+			if (new_thread->base.rt_stats.min_waiting_time == 0 ||
+			    waiting_time < new_thread->base.rt_stats.min_waiting_time) {
+				new_thread->base.rt_stats.min_waiting_time = waiting_time;
+			}
+			if (waiting_time > new_thread->base.rt_stats.max_waiting_time) {
+				new_thread->base.rt_stats.max_waiting_time = waiting_time;
+			}
+			
+#ifdef CONFIG_736_RT_STATS_SQUARED
+			new_thread->base.rt_stats.sum_waiting_time_sq += 
+				(uint64_t)waiting_time * waiting_time;
+#endif
+			/* Clear ready time */
+			new_thread->base.rt_stats.last_ready_time = 0;
+		}
+	}
+#endif /* CONFIG_736_RT_STATS_DETAILED */
+	
+	z_sched_usage_switch(new_thread);
 	_current->switch_handle = interrupted;
-	set_current(_kernel.ready_q.cache);
+	set_current(new_thread);
 	return _current->switch_handle;
 #endif /* CONFIG_SMP */
 }

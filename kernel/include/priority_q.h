@@ -63,8 +63,9 @@ static ALWAYS_INLINE void z_priq_simple_init(sys_dlist_t *pq)
 }
 
 /* Custom scheduler algorithm comparison functions */
-#ifdef CONFIG_736
+#ifdef CONFIG_736_ADD_ONS
 
+#ifdef CONFIG_736_MOD_EDF
 /**
  * Weighted EDF - schedules based on deadline/weight ratio
  * Lower ratio = higher priority (sooner effective deadline)
@@ -82,7 +83,9 @@ static ALWAYS_INLINE int32_t z_sched_cmp_weighted_edf(struct k_thread *t1, struc
 
 	return (d2 / w2) - (d1 / w1);
 }
+#endif /* CONFIG_736_MOD_EDF */
 
+#ifdef CONFIG_736_WSRT
 /**
  * Weighted Shortest Remaining Time (WSRT)
  * Schedules based on time_left/weight ratio
@@ -101,7 +104,9 @@ static ALWAYS_INLINE int32_t z_sched_cmp_wsrt(struct k_thread *t1, struct k_thre
 
 	return (tl2 / w2) - (tl1 / w1);
 }
+#endif /* CONFIG_736_WSRT */
 
+#ifdef CONFIG_736_RMS
 /**
  * Rate Monotonic Scheduling (RMS)
  * Schedules based on execution time (shorter = higher priority)
@@ -114,7 +119,9 @@ static ALWAYS_INLINE int32_t z_sched_cmp_rms(struct k_thread *t1, struct k_threa
 
 	return et2 - et1;
 }
+#endif /* CONFIG_736_RMS */
 
+#ifdef CONFIG_736_LLF
 /**
  * Least Laxity First (LLF)
  * Schedules based on slack time: laxity = deadline - time_left - current_time
@@ -137,7 +144,9 @@ static ALWAYS_INLINE int32_t z_sched_cmp_llf(struct k_thread *t1, struct k_threa
 
 	return laxity2 - laxity1;
 }
+#endif /* CONFIG_736_LLF */
 
+#ifdef CONFIG_736_PFS
 /**
  * Proportional Fair Scheduling (PFS) / Weighted Fair Queuing
  * Schedules based on virtual runtime to ensure fairness
@@ -161,8 +170,9 @@ static ALWAYS_INLINE int32_t z_sched_cmp_pfs(struct k_thread *t1, struct k_threa
 	 */
 	return (runtime1 / w1) - (runtime2 / w2);
 }
+#endif /* CONFIG_736_PFS */
 
-#endif /* CONFIG_736 */
+#endif /* CONFIG_736_ADD_ONS */
 
 /**
  * Standard EDF - schedules based on absolute deadline

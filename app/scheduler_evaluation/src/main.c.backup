@@ -1,0 +1,560 @@
+/*
+ * Comprehensive Scheduler Evaluation Application
+ * 
+ * Evaluates all 5 custom scheduling algorithms across:
+ * - Variable thread counts (3, 5, 8, 10 threads)
+ * - Variable workloads (light, moderate, heavy, overload)
+ * - Different task mixes (all periodic, mixed, bursty)
+ * - Latency-critical vs best-effort scenarios
+ * 
+ * Outputs comparative performance metrics for analysis
+ */
+
+#include <zephyr/kernel.h>
+#include <zephyr/kernel/sched_rt.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/random/random.h>
+#include <string.h>
+
+/* ============================================================================
+ * Configuration
+ * ============================================================================ */
+
+#define MAX_TEST_THREADS 10
+#define STACK_SIZE 2048
+#define BASE_PRIORITY 5
+
+/* Test scenarios */
+#define NUM_THREAD_CONFIGS 4    /* 3, 5, 8, 10 threads */
+#define NUM_LOAD_CONFIGS 4      /* Light, Moderate, Heavy, Overload */
+#define TEST_DURATION_MS 2000   /* Duration for each test scenario */
+
+/* Workload profiles */
+typedef enum {
+	LOAD_LIGHT,      /* 40% CPU utilization */
+	LOAD_MODERATE,   /* 70% CPU utilization */
+	LOAD_HEAVY,      /* 90% CPU utilization */
+	LOAD_OVERLOAD    /* 110% CPU utilization - intentional overload */
+} workload_type_t;
+
+/* Task mix types */
+typedef enum {
+	MIX_PERIODIC,    /* All periodic tasks */
+	MIX_MIXED,       /* Mix of periodic and sporadic */
+	MIX_BURSTY       /* Bursty, high-variance workloads */
+} task_mix_t;
+
+/* ============================================================================
+ * Data Structures
+ * ============================================================================ */
+
+struct thread_config {
+	const char *name;
+	uint32_t period_ms;
+	uint32_t deadline_ms;
+	uint32_t exec_time_ms;
+	uint32_t weight;
+	bool is_critical;
+};
+
+struct test_scenario {
+	int num_threads;
+	workload_type_t load;
+	task_mix_t mix;
+	const char *description;
+};
+
+struct evaluation_results {
+	/* Scheduler identification */
+	const char *scheduler_name;
+	int num_threads;
+	workload_type_t load_type;
+	
+	/* Performance metrics */
+	uint32_t total_activations;
+	uint32_t total_deadline_misses;
+	uint32_t critical_deadline_misses;
+	float miss_rate;
+	float critical_miss_rate;
+	
+	/* Latency metrics */
+	uint32_t avg_response_time;
+	uint32_t max_response_time;
+	uint32_t avg_waiting_time;
+	uint32_t max_jitter;
+	
+	/* Scheduler overhead */
+	uint32_t total_preemptions;
+	uint32_t total_context_switches;
+	float avg_preemptions_per_activation;
+	
+	/* CPU utilization */
+	uint32_t test_duration_ms;
+	uint32_t total_execution_time_ms;
+	float cpu_utilization;
+};
+
+/* ============================================================================
+ * Thread Management
+ * ============================================================================ */
+
+static K_THREAD_STACK_ARRAY_DEFINE(eval_stacks, MAX_TEST_THREADS, STACK_SIZE);
+static struct k_thread eval_threads[MAX_TEST_THREADS];
+static k_tid_t eval_tids[MAX_TEST_THREADS];
+static struct thread_config thread_configs[MAX_TEST_THREADS];
+
+static struct k_sem test_start_sem;
+static struct k_sem test_complete_sem;
+static volatile int active_thread_count;
+static volatile bool test_running;
+static uint64_t test_start_time;
+
+/* Statistics collection */
+static struct {
+	uint32_t activations;
+	uint32_t deadline_misses;
+	uint32_t total_latency_ms;
+	uint32_t max_latency_ms;
+	uint32_t min_latency_ms;
+	uint32_t preemptions;
+} thread_stats[MAX_TEST_THREADS];
+
+/* ============================================================================
+ * Scheduler Detection
+ * ============================================================================ */
+
+static const char *get_scheduler_name(void)
+{
+#ifdef CONFIG_736_MOD_EDF
+	return "Weighted-EDF";
+#elif defined(CONFIG_736_RMS)
+	return "RMS";
+#elif defined(CONFIG_736_WSRT)
+	return "WSRT";
+#elif defined(CONFIG_736_LLF)
+	return "LLF";
+#elif defined(CONFIG_736_PFS)
+	return "PFS";
+#else
+	return "Standard-EDF";
+#endif
+}
+
+/* ============================================================================
+ * Workload Generation
+ * ============================================================================ */
+
+static void generate_thread_configs(int num_threads, workload_type_t load, task_mix_t mix)
+{
+	/* Base configuration depends on load type */
+	uint32_t base_period, base_exec, period_multiplier;
+	
+	switch (load) {
+	case LOAD_LIGHT:
+		base_period = 100;
+		base_exec = 15;
+		period_multiplier = 2;
+		break;
+	case LOAD_MODERATE:
+		base_period = 80;
+		base_exec = 25;
+		period_multiplier = 2;
+		break;
+	case LOAD_HEAVY:
+		base_period = 60;
+		base_exec = 30;
+		period_multiplier = 1;
+		break;
+	case LOAD_OVERLOAD:
+		base_period = 40;
+		base_exec = 35;
+		period_multiplier = 1;
+		break;
+	default:
+		base_period = 100;
+		base_exec = 20;
+		period_multiplier = 2;
+	}
+	
+	for (int i = 0; i < num_threads; i++) {
+		uint32_t period = base_period + (i * 20 * period_multiplier);
+		uint32_t exec = base_exec + (i * 3);
+		uint32_t deadline = period * 8 / 10; /* 80% of period */
+		
+		/* Adjust for task mix */
+		if (mix == MIX_BURSTY && (i % 2 == 0)) {
+			exec = exec * 15 / 10; /* 150% for bursty tasks */
+		} else if (mix == MIX_MIXED && (i % 3 == 0)) {
+			period = period * 3 / 2; /* Sporadic: longer period */
+		}
+		
+		thread_configs[i].period_ms = period;
+		thread_configs[i].deadline_ms = deadline;
+		thread_configs[i].exec_time_ms = exec;
+		thread_configs[i].weight = (num_threads - i); /* Higher weight for lower index */
+		thread_configs[i].is_critical = (i < num_threads / 3); /* First third are critical */
+		
+		static char name_buf[MAX_TEST_THREADS][16];
+		snprintf(name_buf[i], sizeof(name_buf[i]), "T%d", i);
+		thread_configs[i].name = name_buf[i];
+	}
+}
+
+/* ============================================================================
+ * Thread Entry Point
+ * ============================================================================ */
+
+static void eval_thread_entry(void *p1, void *p2, void *p3)
+{
+	int thread_idx = (int)(uintptr_t)p1;
+	struct thread_config *config = &thread_configs[thread_idx];
+	
+	/* Initialize stats */
+	thread_stats[thread_idx].activations = 0;
+	thread_stats[thread_idx].deadline_misses = 0;
+	thread_stats[thread_idx].total_latency_ms = 0;
+	thread_stats[thread_idx].max_latency_ms = 0;
+	thread_stats[thread_idx].min_latency_ms = UINT32_MAX;
+	thread_stats[thread_idx].preemptions = 0;
+	
+	/* Wait for test start */
+	k_sem_take(&test_start_sem, K_FOREVER);
+	
+	/* Run until test completes */
+	while (test_running) {
+		uint64_t iteration_start = k_uptime_get();
+		uint64_t deadline_abs = iteration_start + config->deadline_ms;
+		
+		/* Mark activation */
+		thread_stats[thread_idx].activations++;
+#ifdef CONFIG_736_RT_STATS
+		k_thread_rt_stats_activation(NULL);
+#endif
+		
+		/* Set scheduling parameters */
+		k_thread_deadline_set(k_current_get(), config->deadline_ms);
+#ifdef CONFIG_736_ADD_ONS
+		k_thread_weight_set(k_current_get(), config->weight);
+		k_thread_exec_time_set(k_current_get(), config->exec_time_ms);
+		k_thread_time_left_set(k_current_get(), config->exec_time_ms);
+#endif
+		
+		/* Execute workload with variance */
+		uint32_t exec_us = config->exec_time_ms * 1000;
+		uint32_t variance = (sys_rand32_get() % (exec_us / 3)); /* ±33% variance */
+		uint32_t actual_exec_us = exec_us + variance - (exec_us / 6);
+		k_busy_wait(actual_exec_us);
+		
+		/* Measure latency */
+		uint64_t iteration_end = k_uptime_get();
+		uint32_t latency = (uint32_t)(iteration_end - iteration_start);
+		
+		thread_stats[thread_idx].total_latency_ms += latency;
+		if (latency > thread_stats[thread_idx].max_latency_ms) {
+			thread_stats[thread_idx].max_latency_ms = latency;
+		}
+		if (latency < thread_stats[thread_idx].min_latency_ms) {
+			thread_stats[thread_idx].min_latency_ms = latency;
+		}
+		
+		/* Check deadline miss */
+		if (iteration_end > deadline_abs) {
+			thread_stats[thread_idx].deadline_misses++;
+#ifdef CONFIG_736_RT_STATS
+			k_thread_rt_stats_deadline_miss(NULL);
+#endif
+		}
+		
+		/* Sleep until next period */
+		uint64_t elapsed = iteration_end - iteration_start;
+		if (elapsed < config->period_ms) {
+			k_msleep(config->period_ms - elapsed);
+		}
+		
+		/* Check if test time expired */
+		if ((k_uptime_get() - test_start_time) >= TEST_DURATION_MS) {
+			break;
+		}
+	}
+	
+#ifdef CONFIG_736_RT_STATS
+	/* Collect final RT stats */
+	struct k_thread_rt_stats rt_stats;
+	if (k_thread_rt_stats_get(NULL, &rt_stats) == 0) {
+		thread_stats[thread_idx].preemptions = rt_stats.preemptions;
+	}
+#endif
+	
+	/* Signal completion */
+	if (atomic_dec(&active_thread_count) == 1) {
+		k_sem_give(&test_complete_sem);
+	}
+}
+
+/* ============================================================================
+ * Test Execution
+ * ============================================================================ */
+
+static void run_test_scenario(int num_threads, workload_type_t load, task_mix_t mix,
+                               struct evaluation_results *results)
+{
+	/* Generate thread configurations */
+	generate_thread_configs(num_threads, load, mix);
+	
+	/* Initialize synchronization */
+	k_sem_init(&test_start_sem, 0, num_threads);
+	k_sem_init(&test_complete_sem, 0, 1);
+	active_thread_count = num_threads;
+	test_running = true;
+	
+	/* Reset all thread stats */
+	memset(thread_stats, 0, sizeof(thread_stats));
+	
+	/* Create threads */
+	for (int i = 0; i < num_threads; i++) {
+		eval_tids[i] = k_thread_create(&eval_threads[i],
+		                                eval_stacks[i],
+		                                STACK_SIZE,
+		                                eval_thread_entry,
+		                                (void *)(uintptr_t)i, NULL, NULL,
+		                                BASE_PRIORITY, 0, K_NO_WAIT);
+		
+#ifdef CONFIG_736_RT_STATS
+		k_thread_rt_stats_reset(eval_tids[i]);
+#endif
+	}
+	
+	/* Start test */
+	printk("  Starting %d threads...\n", num_threads);
+	test_start_time = k_uptime_get();
+	for (int i = 0; i < num_threads; i++) {
+		k_sem_give(&test_start_sem);
+	}
+	
+	/* Wait for completion */
+	k_sem_take(&test_complete_sem, K_FOREVER);
+	test_running = false;
+	uint64_t test_end_time = k_uptime_get();
+	
+	/* Collect results */
+	results->scheduler_name = get_scheduler_name();
+	results->num_threads = num_threads;
+	results->load_type = load;
+	results->test_duration_ms = (uint32_t)(test_end_time - test_start_time);
+	
+	uint32_t total_activations = 0;
+	uint32_t total_misses = 0;
+	uint32_t critical_misses = 0;
+	uint32_t total_response = 0;
+	uint32_t max_response = 0;
+	uint32_t max_jitter = 0;
+	uint32_t total_preemptions = 0;
+	uint32_t total_exec_time = 0;
+	
+	for (int i = 0; i < num_threads; i++) {
+		total_activations += thread_stats[i].activations;
+		total_misses += thread_stats[i].deadline_misses;
+		total_preemptions += thread_stats[i].preemptions;
+		
+		if (thread_configs[i].is_critical) {
+			critical_misses += thread_stats[i].deadline_misses;
+		}
+		
+		if (thread_stats[i].activations > 0) {
+			uint32_t avg_lat = thread_stats[i].total_latency_ms / 
+			                   thread_stats[i].activations;
+			total_response += avg_lat;
+			
+			if (thread_stats[i].max_latency_ms > max_response) {
+				max_response = thread_stats[i].max_latency_ms;
+			}
+			
+			uint32_t jitter = thread_stats[i].max_latency_ms - 
+			                  thread_stats[i].min_latency_ms;
+			if (jitter > max_jitter) {
+				max_jitter = jitter;
+			}
+			
+			total_exec_time += thread_stats[i].total_latency_ms * 
+			                   thread_stats[i].activations;
+		}
+	}
+	
+	results->total_activations = total_activations;
+	results->total_deadline_misses = total_misses;
+	results->critical_deadline_misses = critical_misses;
+	results->miss_rate = total_activations > 0 ? 
+	                     (total_misses * 100.0f) / total_activations : 0;
+	results->critical_miss_rate = (num_threads / 3 * 20) > 0 ?
+	                              (critical_misses * 100.0f) / (num_threads / 3 * 20) : 0;
+	results->avg_response_time = num_threads > 0 ? total_response / num_threads : 0;
+	results->max_response_time = max_response;
+	results->max_jitter = max_jitter;
+	results->total_preemptions = total_preemptions;
+	results->avg_preemptions_per_activation = total_activations > 0 ?
+	                                          (float)total_preemptions / total_activations : 0;
+	results->cpu_utilization = results->test_duration_ms > 0 ?
+	                           (total_exec_time * 100.0f) / results->test_duration_ms : 0;
+	
+	printk("  Completed: %u activations, %u misses (%.1f%%)\n",
+	       total_activations, total_misses, results->miss_rate);
+	
+	/* Cleanup threads */
+	k_msleep(100); /* Let threads finish */
+}
+
+/* ============================================================================
+ * Results Display
+ * ============================================================================ */
+
+static void print_results_header(void)
+{
+	printk("\n");
+	printk("═══════════════════════════════════════════════════════════════════════════\n");
+	printk("  Scheduler Evaluation Results\n");
+	printk("═══════════════════════════════════════════════════════════════════════════\n");
+	printk("Scheduler: %s\n", get_scheduler_name());
+	printk("═══════════════════════════════════════════════════════════════════════════\n\n");
+}
+
+static const char* load_type_name(workload_type_t load)
+{
+	switch (load) {
+	case LOAD_LIGHT: return "Light";
+	case LOAD_MODERATE: return "Moderate";
+	case LOAD_HEAVY: return "Heavy";
+	case LOAD_OVERLOAD: return "Overload";
+	default: return "Unknown";
+	}
+}
+
+static void print_result_row(struct evaluation_results *r)
+{
+	printk("│ %2d │ %-9s │ %5u │ %5u │ %6.2f │ %6.2f │ %5u │ %5u │ %5u │ %6.1f │\n",
+	       r->num_threads,
+	       load_type_name(r->load_type),
+	       r->total_activations,
+	       r->total_deadline_misses,
+	       r->miss_rate,
+	       r->critical_miss_rate,
+	       r->avg_response_time,
+	       r->max_response_time,
+	       r->max_jitter,
+	       r->avg_preemptions_per_activation);
+}
+
+static void print_results_table(struct evaluation_results *results, int num_results)
+{
+	printk("┌────┬───────────┬───────┬───────┬────────┬────────┬───────┬───────┬───────┬────────┐\n");
+	printk("│ Th │   Load    │ Activ │ Miss  │ Miss%%  │ Crit%%  │ AvgRT │ MaxRT │ Jittr │ Prmpt  │\n");
+	printk("├────┼───────────┼───────┼───────┼────────┼────────┼───────┼───────┼───────┼────────┤\n");
+	
+	for (int i = 0; i < num_results; i++) {
+		print_result_row(&results[i]);
+	}
+	
+	printk("└────┴───────────┴───────┴───────┴────────┴────────┴───────┴───────┴───────┴────────┘\n");
+}
+
+static void print_summary(struct evaluation_results *results, int num_results)
+{
+	printk("\n═══════════════════════════════════════════════════════════════════════════\n");
+	printk("  Performance Summary for %s\n", get_scheduler_name());
+	printk("═══════════════════════════════════════════════════════════════════════════\n\n");
+	
+	/* Calculate aggregates */
+	uint32_t total_tests_with_misses = 0;
+	uint32_t total_critical_misses = 0;
+	float avg_miss_rate = 0;
+	float max_miss_rate = 0;
+	
+	for (int i = 0; i < num_results; i++) {
+		if (results[i].total_deadline_misses > 0) {
+			total_tests_with_misses++;
+		}
+		total_critical_misses += results[i].critical_deadline_misses;
+		avg_miss_rate += results[i].miss_rate;
+		if (results[i].miss_rate > max_miss_rate) {
+			max_miss_rate = results[i].miss_rate;
+		}
+	}
+	avg_miss_rate /= num_results;
+	
+	printk("Overall Performance:\n");
+	printk("  Tests with deadline misses: %u / %d\n", total_tests_with_misses, num_results);
+	printk("  Total critical misses:      %u\n", total_critical_misses);
+	printk("  Average miss rate:          %.2f%%\n", avg_miss_rate);
+	printk("  Maximum miss rate:          %.2f%%\n", max_miss_rate);
+	
+	/* Rating */
+	printk("\nScheduler Rating: ");
+	if (total_critical_misses == 0 && max_miss_rate < 1.0) {
+		printk("★★★★★ EXCELLENT - Meets all critical deadlines\n");
+	} else if (total_critical_misses == 0 && max_miss_rate < 5.0) {
+		printk("★★★★☆ GOOD - All critical deadlines met\n");
+	} else if (max_miss_rate < 10.0) {
+		printk("★★★☆☆ ACCEPTABLE - Some deadline misses\n");
+	} else if (max_miss_rate < 25.0) {
+		printk("★★☆☆☆ POOR - Frequent deadline misses\n");
+	} else {
+		printk("★☆☆☆☆ INADEQUATE - High miss rate\n");
+	}
+	
+	printk("\n");
+}
+
+/* ============================================================================
+ * Main Evaluation Loop
+ * ============================================================================ */
+
+int main(void)
+{
+	printk("\n");
+	printk("╔═══════════════════════════════════════════════════════════════════════╗\n");
+	printk("║           Comprehensive Scheduler Evaluation Suite                   ║\n");
+	printk("╚═══════════════════════════════════════════════════════════════════════╝\n");
+	printk("\n");
+	printk("Evaluating: %s\n", get_scheduler_name());
+	printk("Test Duration: %d ms per scenario\n", TEST_DURATION_MS);
+	printk("Thread Counts: 3, 5, 8, 10\n");
+	printk("Load Levels: Light, Moderate, Heavy, Overload\n");
+	printk("\n");
+	
+	/* Test matrix */
+	int thread_counts[] = {3, 5, 8, 10};
+	workload_type_t loads[] = {LOAD_LIGHT, LOAD_MODERATE, LOAD_HEAVY, LOAD_OVERLOAD};
+	
+	struct evaluation_results results[NUM_THREAD_CONFIGS * NUM_LOAD_CONFIGS];
+	int result_idx = 0;
+	
+	/* Run all test scenarios */
+	for (int t = 0; t < NUM_THREAD_CONFIGS; t++) {
+		for (int l = 0; l < NUM_LOAD_CONFIGS; l++) {
+			printk("─────────────────────────────────────────────────────────────────────────\n");
+			printk("Test %d/%d: %d threads, %s load\n",
+			       result_idx + 1,
+			       NUM_THREAD_CONFIGS * NUM_LOAD_CONFIGS,
+			       thread_counts[t],
+			       load_type_name(loads[l]));
+			printk("─────────────────────────────────────────────────────────────────────────\n");
+			
+			run_test_scenario(thread_counts[t], loads[l], MIX_PERIODIC,
+			                  &results[result_idx]);
+			
+			result_idx++;
+			k_msleep(500); /* Brief pause between tests */
+		}
+	}
+	
+	/* Display results */
+	print_results_header();
+	print_results_table(results, result_idx);
+	print_summary(results, result_idx);
+	
+	printk("╔═══════════════════════════════════════════════════════════════════════╗\n");
+	printk("║                      Evaluation Complete                             ║\n");
+	printk("╚═══════════════════════════════════════════════════════════════════════╝\n");
+	printk("\n");
+	
+	return 0;
+}

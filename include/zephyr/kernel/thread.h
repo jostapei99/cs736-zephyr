@@ -92,45 +92,50 @@ struct _thread_base {
 #ifdef CONFIG_SCHED_DEADLINE
 	int prio_deadline;
 #endif /* CONFIG_SCHED_DEADLINE */
-#ifdef CONFIG_736
-	int prio_exec_time;
-	int prio_weight;
-#ifdef CONFIG_736_TIME_LEFT
-	int prio_time_left;
-#endif
-#endif
+#ifdef CONFIG_736_ADD_ONS
+	int prio_weight;       /* Thread weight for weighted scheduling */
+	uint32_t prio_exec_time;   /* Expected execution time (for RMS, PFS) */
+	uint32_t prio_time_left;   /* Remaining execution time (for WSRT, LLF) */
+#endif /* CONFIG_736_ADD_ONS */
 
 #ifdef CONFIG_736_RT_STATS
 	struct {
 		/* Event counters */
-		uint32_t activations;        /* Number of job releases */
-		uint32_t preemptions;        /* Times preempted by higher priority */
-		uint32_t context_switches;   /* Total context switches (in/out) */
-		uint32_t deadline_misses;    /* Number of deadline violations */
-		uint32_t priority_inversions; /* Times blocked by lower priority */
+		uint32_t activations;          /* Number of times thread was set to ready */
+		uint32_t completions;          /* Number of times thread completed execution successfully */
+		uint32_t preemptions;          /* Number of times thread was preempted */
+		uint32_t context_switches;     /* Number of context switches involving this thread (in/out) */
+		uint32_t deadline_misses;      /* Number of times thread missed its deadline */
+		uint32_t priority_inversions;  /* Number of times thread was blocked by lower priority threads */
+		
+		/* Timing statistics (in cycles or microseconds) */
+		uint64_t total_response_time;  /* Cumulative response time */
+		uint64_t total_waiting_time;   /* Cumulative waiting time */
+		uint64_t total_exec_time;      /* Cumulative execution time */
+		uint64_t total_blocked_time;   /* Cumulative blocked time */
 
-		/* Timing statistics (in milliseconds or cycles) */
-		uint64_t total_response_time;  /* Sum of all response times */
-		uint64_t total_waiting_time;   /* Sum of all waiting times */
-		uint64_t total_exec_time;      /* Sum of actual execution times */
 		uint32_t min_response_time;    /* Minimum response time observed */
 		uint32_t max_response_time;    /* Maximum response time observed */
 		uint32_t min_waiting_time;     /* Minimum waiting time observed */
 		uint32_t max_waiting_time;     /* Maximum waiting time observed */
+		uint32_t min_exec_time;        /* Minimum execution time observed */
+		uint32_t max_exec_time;        /* Maximum execution time observed */
 
 #ifdef CONFIG_736_RT_STATS_SQUARED
-		/* Squared sums for variance/jitter calculation */
-		uint64_t sum_response_time_sq; /* Σ(response_time²) */
-		uint64_t sum_waiting_time_sq;  /* Σ(waiting_time²) */
-#endif
+		/* For variance/jitter calculation: σ² = E[X²] - E[X]² */
+		uint64_t sum_response_time_sq; /* Sum of squared response times */
+		uint64_t sum_waiting_time_sq;  /* Sum of squared waiting times */
+		uint64_t sum_exec_time_sq;     /* Sum of squared execution times */
+#endif /* CONFIG_736_RT_STATS_SQUARED */
 
 #ifdef CONFIG_736_RT_STATS_DETAILED
-		/* Detailed timestamps (using k_uptime_get() units) */
-		uint64_t last_activation_time;  /* When job was released */
-		uint64_t last_ready_time;       /* When entered ready queue */
-		uint64_t last_start_time;       /* When dispatched to CPU */
-		uint64_t last_completion_time;  /* When finished execution */
-#endif
+		uint64_t last_activation_time;   /* Timestamp of last activation */
+		uint64_t last_ready_time;        /* Timestamp when last set to ready */
+		uint64_t last_start_time;        /* Timestamp when last started running */
+		uint64_t last_completion_time;   /* Timestamp when last completed execution */
+		uint64_t last_preempt_time;      /* Timestamp when last preempted */
+		uint64_t last_blocked_time;      /* Timestamp when last blocked */
+#endif /* CONFIG_736_RT_STATS_DETAILED */
 	} rt_stats;
 #endif /* CONFIG_736_RT_STATS */
 
